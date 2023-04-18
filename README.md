@@ -30,7 +30,7 @@ LocalSend is a cross-platform app that enables secure communication between devi
 
 ## Screenshots
 
-<img src="https://localsend.org/img/screenshot-iphone.png" alt="iPhone screenshot" height="300"/> <img src="https://localsend.org/img/screenshot-pc.png" alt="PC screenshot" height="300"/>
+<img src="https://localsend.org/img/screenshot-iphone.webp" alt="iPhone screenshot" height="300"/> <img src="https://localsend.org/img/screenshot-pc.webp" alt="PC screenshot" height="300"/>
 
 ## Download
 
@@ -39,7 +39,7 @@ It is recommended to download the app either from an app store or from a package
 On Windows, the store version is not available anymore: <https://github.com/localsend/localsend/issues/220>
 
 | Windows                  | macOS                   | Linux              | Andoid         | iOS           | Fire OS    |
-| ------------------------ | ----------------------- | ------------------ | -------------- | ------------- | ---------- |
+|--------------------------|-------------------------|--------------------|----------------|---------------|------------|
 | [Windows Store][]        | [App Store][]           | [Flathub][]        | [Play Store][] | [App Store][] | [Amazon][] |
 | [Winget][]               | [Homebrew][]            | [AUR][]            | [F-Droid][]    |               |            |
 | [Scoop][]                | [DMG Installer][latest] | [AppImage][latest] | [APK][latest]  |               |            |
@@ -101,7 +101,7 @@ You can help translating this app to other languages!
 ### Bug fixes and improvements
 
 - **Bug Fixes:** If you find a bug, please create a pull request with a clear description of the issue and how to fix it.
-- **Improvements:** Have an idea for how to improve LocalSend? Please create an issue first so we can discuss why the improvement is needed.
+- **Improvements:** Have an idea for how to improve LocalSend? Please create an issue first, so we can discuss why the improvement is needed.
 
 For more information, see the [contributing guide](https://github.com/localsend/localsend/blob/main/CONTRIBUTING.md).
 
@@ -175,6 +175,6 @@ Feel free to open a pull request. There is a `snap` branch to play with.
 
 ## Contributors
 
-<a align="center" href="https://github.com/localsend/localsend/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=localsend/localsend" />
+<a href="https://github.com/localsend/localsend/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=localsend/localsend"  alt="Localsend Contributors"/>
 </a>
