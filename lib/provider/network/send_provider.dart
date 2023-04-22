@@ -7,8 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:localsend_app/model/cross_file.dart';
 import 'package:localsend_app/model/device.dart';
 import 'package:localsend_app/model/dto/file_dto.dart';
-import 'package:localsend_app/model/dto/info_dto.dart';
-import 'package:localsend_app/model/dto/send_request_dto.dart';
+import 'package:localsend_app/model/dto/info_register_dto.dart';
+import 'package:localsend_app/model/dto/multicast_dto.dart';
+import 'package:localsend_app/model/dto/prepare_upload_request_dto.dart';
+import 'package:localsend_app/model/dto/prepare_upload_response_dto.dart';
 import 'package:localsend_app/model/file_status.dart';
 import 'package:localsend_app/model/file_type.dart';
 import 'package:localsend_app/model/send_mode.dart';
@@ -24,6 +26,7 @@ import 'package:localsend_app/provider/progress_provider.dart';
 import 'package:localsend_app/provider/selection/selected_sending_files_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/util/api_route_builder.dart';
+import 'package:mime/mime.dart';
 import 'package:routerino/routerino.dart';
 import 'package:uuid/uuid.dart';
 
@@ -60,6 +63,7 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
 
     final requestState = SendSessionState(
       sessionId: sessionId,
+      remoteSessionId: null,
       background: background,
       status: SessionStatus.waiting,
       target: target,
@@ -73,10 +77,11 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
               fileName: file.name,
               size: file.size,
               fileType: file.fileType,
-              sha256: null,
+              hash: null,
               preview: files.length == 1 && files.first.fileType == FileType.text && files.first.bytes != null
                   ? utf8.decode(files.first.bytes!) // send simple message by embedding it into the preview
                   : null,
+              legacy: target.version == '1.0',
             ),
             status: FileStatus.queue,
             token: null,
@@ -94,14 +99,18 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     );
 
     final originDevice = ref.read(deviceInfoProvider);
-    final requestDto = SendRequestDto(
-      info: InfoDto(
+    final requestDto = PrepareUploadRequestDto(
+      info: InfoRegisterDto(
         alias: originDevice.alias,
+        version: originDevice.version,
         deviceModel: originDevice.deviceModel,
         deviceType: originDevice.deviceType,
+        fingerprint: originDevice.fingerprint,
+        port: originDevice.port,
+        protocol: originDevice.https ? ProtocolType.https : ProtocolType.http,
       ),
       files: {
-        for (final file in requestState.files.values) file.file.id: file.file,
+        for (final entry in requestState.files.entries) entry.key: entry.value.file,
       },
     );
 
@@ -121,8 +130,8 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     final Response response;
     try {
       response = await requestDio.post(
-        ApiRoute.sendRequest.target(target),
-        data: requestDto.toJson(),
+        ApiRoute.prepareUpload.target(target),
+        data: jsonEncode(requestDto), // jsonEncode for better logging
         cancelToken: cancelToken,
       );
     } catch (e) {
@@ -152,8 +161,38 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
       return;
     }
 
-    final responseMap = response.data as Map;
-    if (responseMap.isEmpty) {
+    final Map<String, String> fileMap;
+    if (target.version == '1.0') {
+      fileMap = (response.data as Map).cast<String, String>();
+    } else {
+      if (response.statusCode == 204) {
+        // Nothing selected
+        // Interpret this as "Read and close"
+        fileMap = {};
+      } else {
+        try {
+          final responseDto = PrepareUploadResponseDto.fromJson(response.data);
+          fileMap = responseDto.files;
+          state = state.updateSession(
+            sessionId: sessionId,
+            state: (s) => s?.copyWith(
+              remoteSessionId: responseDto.sessionId,
+            ),
+          );
+        } catch (e) {
+          state = state.updateSession(
+            sessionId: sessionId,
+            state: (s) => s?.copyWith(
+              status: SessionStatus.finishedWithErrors,
+              errorMessage: e.humanErrorMessage,
+            ),
+          );
+          return;
+        }
+      }
+    }
+
+    if (fileMap.isEmpty) {
       // receiver has nothing selected
       state = state.updateSession(
         sessionId: sessionId,
@@ -173,8 +212,7 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
 
     final sendingFiles = {
       for (final file in requestState.files.values)
-        file.file.id:
-            responseMap.containsKey(file.file.id) ? file.copyWith(token: responseMap[file.file.id]) : file.copyWith(status: FileStatus.skipped),
+        file.file.id: fileMap.containsKey(file.file.id) ? file.copyWith(token: fileMap[file.file.id]) : file.copyWith(status: FileStatus.skipped),
     };
 
     if (state[sessionId]?.background == false) {
@@ -205,6 +243,7 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
 
   Future<void> _send(String sessionId, Dio dio, Device target, Map<String, SendingFile> files) async {
     bool hasError = false;
+    final remoteSessionId = state[sessionId]!.remoteSessionId;
 
     state = state.updateSession(
       sessionId: sessionId,
@@ -232,13 +271,15 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
         );
         final stopwatch = Stopwatch()..start();
         await dio.post(
-          ApiRoute.send.target(target, query: {
+          ApiRoute.upload.target(target, query: {
+            if (remoteSessionId != null) 'sessionId': remoteSessionId,
             'fileId': file.file.id,
             'token': token,
           }),
           options: Options(
             headers: {
               'Content-Length': file.file.size,
+              'Content-Type': lookupMimeType(file.file.fileName),
             },
           ),
           data: file.path != null ? File(file.path!).openRead() : Stream.fromIterable([file.bytes!]),
@@ -246,10 +287,10 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
             if (stopwatch.elapsedMilliseconds >= 100) {
               stopwatch.reset();
               ref.read(progressProvider.notifier).setProgress(
-                sessionId: sessionId,
-                fileId: file.file.id,
-                progress: curr / total,
-              );
+                    sessionId: sessionId,
+                    fileId: file.file.id,
+                    progress: curr / total,
+                  );
             }
           },
           cancelToken: cancelToken,
@@ -257,10 +298,10 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
 
         // set progress to 100% when successfully finished
         ref.read(progressProvider.notifier).setProgress(
-          sessionId: sessionId,
-          fileId: file.file.id,
-          progress: 1,
-        );
+              sessionId: sessionId,
+              fileId: file.file.id,
+              progress: 1,
+            );
       } catch (e, st) {
         fileError = e.humanErrorMessage;
         hasError = true;
@@ -297,11 +338,16 @@ class SendNotifier extends Notifier<Map<String, SendSessionState>> {
     if (sessionState == null) {
       return;
     }
+    final remoteSessionId = sessionState.remoteSessionId;
     sessionState.cancelToken?.cancel(); // cancel current request
 
     // notify the receiver
     unawaited(
-      ref.read(dioProvider(DioType.discovery)).post(ApiRoute.cancel.target(sessionState.target)).then((_) {}).catchError((e) {
+      ref
+          .read(dioProvider(DioType.discovery))
+          .post(ApiRoute.cancel.target(sessionState.target, query: remoteSessionId != null ? {'sessionId': remoteSessionId} : null))
+          .then((_) {})
+          .catchError((e) {
         print(e);
       }),
     );

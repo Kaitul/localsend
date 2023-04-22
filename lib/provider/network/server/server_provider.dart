@@ -5,13 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:localsend_app/constants.dart';
 import 'package:localsend_app/model/cross_file.dart';
 import 'package:localsend_app/model/state/server/server_state.dart';
-import 'package:localsend_app/provider/fingerprint_provider.dart';
 import 'package:localsend_app/provider/network/server/controller/receive_controller.dart';
 import 'package:localsend_app/provider/network/server/controller/send_controller.dart';
 import 'package:localsend_app/provider/network/server/server_utils.dart';
+import 'package:localsend_app/provider/security_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
 import 'package:localsend_app/util/alias_generator.dart';
-import 'package:localsend_app/util/security_helper.dart';
 import 'package:shelf/shelf_io.dart';
 import 'package:shelf_router/shelf_router.dart';
 
@@ -68,31 +67,33 @@ class ServerNotifier extends Notifier<ServerState?> {
     }
 
     final router = Router();
+    final fingerprint = ref.read(securityProvider).certificateHash;
     _receiveController.installRoutes(
       router: router,
       alias: alias,
       port: port,
       https: https,
-      fingerprint: ref.read(fingerprintProvider),
+      fingerprint: fingerprint,
       showToken: ref.read(settingsProvider.select((s) => s.showToken)),
     );
     _sendController.installRoutes(
       router: router,
       alias: alias,
+      fingerprint: fingerprint,
     );
 
     print('Starting server...');
     ServerState? newServerState;
 
     if (https) {
-      final securityContextResult = generateSecurityContext();
+      final securityContext = ref.read(securityProvider);
       newServerState = ServerState(
         httpServer: await _startServer(
           router: router,
           port: port,
           securityContext: SecurityContext()
-            ..usePrivateKeyBytes(securityContextResult.privateKey.codeUnits)
-            ..useCertificateChainBytes(securityContextResult.certificate.codeUnits),
+            ..usePrivateKeyBytes(securityContext.privateKey.codeUnits)
+            ..useCertificateChainBytes(securityContext.certificate.codeUnits),
         ),
         alias: alias,
         port: port,
@@ -196,3 +197,31 @@ Future<HttpServer> _startServer({
     securityContext: securityContext,
   );
 }
+
+// Below is a first prototype of mTLS (mutual TLS).
+// Problem:
+// - we cannot request client certificates while ignoring errors
+
+// Future<HttpServer> _startServer({
+//   required Router router,
+//   required int port,
+//   required SecurityContext? securityContext,
+// }) async {
+//   const address = '0.0.0.0';
+//   final server = await (securityContext == null
+//       ? HttpServer.bind(address, port)
+//       : HttpServer.bindSecure(
+//     address,
+//     port,
+//     securityContext,
+//     requestClientCertificate: true,
+//   ));
+//
+//   final stream = server.map((request) {
+//     print('Request Cert: ${request.certificate?.pem}');
+//     return request;
+//   });
+//
+//   serveRequests(stream, router);
+//   return server;
+// }
