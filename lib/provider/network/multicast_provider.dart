@@ -112,7 +112,6 @@ class MulticastService {
       _ref.read(discoveryLogsProvider.notifier).addLog('[RESPONSE/TCP] Announcement of ${peer.alias} (${peer.ip}, model: ${peer.deviceModel}) via TCP');
     } catch (e) {
       // Fallback: Answer with UDP
-      print('EEE: $e');
       final sockets = await _getSockets(settings.multicastGroup);
       final dto = _getMulticastDto(announcement: false);
       for (final socket in sockets) {
@@ -140,6 +139,7 @@ class MulticastService {
       fingerprint: fingerprint,
       port: serverState?.port ?? settings.port,
       protocol: (serverState?.https ?? settings.https) ? ProtocolType.https : ProtocolType.http,
+      download: serverState?.webSendState != null,
       announcement: announcement,
       announce: announcement,
     );
@@ -158,6 +158,7 @@ class MulticastService {
       fingerprint: fingerprint,
       port: serverState?.port ?? settings.port,
       protocol: (serverState?.https ?? settings.https) ? ProtocolType.https : ProtocolType.http,
+      download: serverState?.webSendState != null,
     );
   }
 }
